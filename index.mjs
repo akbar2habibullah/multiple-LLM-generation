@@ -1,10 +1,10 @@
-import kMeans from 'kmeans-js'
+import kMeansText from 'kmeans-categorize-text'
 import cosineSimilarity from 'compute-cosine-similarity'
 import { GoogleGenerativeAI } from "@google/generative-ai"
 import Groq from "groq-sdk"
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY)
+const groq = new Groq({ apiKey: process.env.GOOGLE_GEMINI_API_KEY })
+const genAI = new GoogleGenerativeAI(process.env.GROQ_API_KEY)
 const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" })
 
 
@@ -30,7 +30,7 @@ const generateResponses = async (prompt, numResponses = 5, model = 'llama3-8b-81
   return responses
 }
 
-const generateResponse = async (prompt, model = 'llama3-8b-8192') => {
+const generateResponse = async (prompt, model = 'llama3-70b-8192') => {
   const chatCompletion = await groq.chat.completions.create({
     messages: [
       {
@@ -39,10 +39,11 @@ const generateResponse = async (prompt, model = 'llama3-8b-8192') => {
       },
     ],
     model,
+    max_tokens: 100,
+    temperature: 0.5
   })
   const result = chatCompletion.choices[0]?.message?.content
 
-  console.log(result)
   return result || ""
 }
 
@@ -59,35 +60,33 @@ const getEmbeddings = async (texts) => {
   return results
 }
 
-// const findUniqueResponses = (responses, embeddings, numClusters = 3) => {
-//   let km = new kMeans({
-//     K: numClusters
-//   })
+const findUniqueResponses = (responses, numClusters = 3, func) => {
+  kMeansText(responses.map((response, idx) => {
+    return { id: idx, text: response }
+  }), numClusters, [], result => {
+    func(result)
+  }, error => console.log(error))
+}
 
-//   km.cluster(embeddings)
-//   while (km.step()) {
-//     km.findClosestCentroids()
-//     km.moveCentroids()
+const generateComprehensiveJudgment = async (uniqueResponses, input) => {
+  let combinedPrompt = "Please consider these sets of ideas and make one last judgment:\n"
 
-//     console.log(km.centroids)
+  let num = 1
+  for (let i in uniqueResponses) {
+    combinedPrompt += `Response ${num}: ${uniqueResponses[i][Object.keys(uniqueResponses[i])[0]]}\n`
+    num += 1
+  }
 
-//     if (km.hasConverged()) break
-//   }
+  combinedPrompt += `Context: ${input}\n`
 
-//   console.log('Finished in:', km.currentIteration, ' iterations')
-//   console.log(km.centroids, km.clusters)
-// }
+  console.log('----------------')
+  console.log(combinedPrompt)
+  console.log('----------------')
 
-// const generateComprehensiveJudgment = async (uniqueResponses) => {
-//   let combinedPrompt = "Please consider these sets of ideas and make one last judgment:\n"
-//   uniqueResponses.forEach((response, i) => {
-//     combinedPrompt += `Response ${i + 1}: ${response}\n`
-//   })
+  const response = await generateResponse(combinedPrompt)
 
-//   const response = await generateResponse(combinedPrompt)
-
-//   return response
-// }
+  return response
+}
 
 const calculateAttentionScores = (embeddings) => {
   const similarityMatrix = embeddings.map((embed1) =>
@@ -121,18 +120,17 @@ const findMostImportantResponse = (responses, embeddings, attentionScores) => {
 
 // Example usage
 const prompt = "Do you know Hu Tao?"
-generateResponses(prompt, 10).then(responses => {
-  console.log(responses)
+generateResponses(prompt, 12).then(responses => {
   getEmbeddings(responses).then(embeddings => {
-    // const uniqueResponses = findUniqueResponses(responses, embeddings, 2)
-    // generateComprehensiveJudgment(uniqueResponses).then(judgment => {
-    //   console.log("Comprehensive judgment based on unique responses:")
-    //   console.log(judgment)
-    // })
+    findUniqueResponses(responses, 5, (uniqueResponses) => {
+      generateComprehensiveJudgment(uniqueResponses, prompt).then(judgment => {
+        console.log("Comprehensive judgment based on unique responses:")
+        console.log(judgment)
+      })
+    })
 
     const attentionScores = calculateAttentionScores(embeddings)
 
-    console.log('---------')
     const mostImportantResponse = findMostImportantResponse(responses, embeddings, attentionScores)
     console.log("\nMost important response based on self-attention mechanism:")
     console.log(mostImportantResponse)
